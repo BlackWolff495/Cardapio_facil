@@ -1,61 +1,28 @@
-// ============================================
-//  Cardápio Fácil — Backend seguro
-//  A sua chave de API fica SÓ aqui no servidor,
-//  nunca chega ao navegador do cliente.
-// ============================================
-
 const express = require("express");
 const path = require("path");
 
 const app = express();
 app.use(express.json());
-
-// Serve o app (frontend) da pasta /public
 app.use(express.static(path.join(__dirname, "public")));
 
-// Pega a chave da variável de ambiente (você configura no deploy)
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 
-// Rota que o app chama para gerar o cardápio
 app.post("/api/gerar-cardapio", async (req, res) => {
   if (!API_KEY) {
-    return res.status(500).json({
-      erro: "Chave de API não configurada no servidor. Defina ANTHROPIC_API_KEY."
-    });
+    return res.status(500).json({ erro: "Chave de API não configurada. Defina ANTHROPIC_API_KEY." });
   }
 
   const prefs = req.body;
 
-  const prompt = `Você é um nutricionista brasileiro especialista em planejamento alimentar prático e saboroso.
+  const prompt = `Você é um nutricionista brasileiro. Crie um cardápio semanal (seg a dom) para ${prefs.pessoas} pessoas. Objetivo: ${prefs.objetivo}. Orçamento: ${prefs.orcamento}. Restrições: ${prefs.restricoes && prefs.restricoes.length ? prefs.restricoes.join(", ") : "nenhuma"}. Não come: ${prefs.naoCome || "nada"}.
 
-Crie um cardápio semanal COMPLETO (segunda a domingo) com base nas preferências:
-- Pessoas: ${prefs.pessoas}
-- Objetivo: ${prefs.objetivo}
-- Orçamento: ${prefs.orcamento}
-- Restrições: ${prefs.restricoes && prefs.restricoes.length ? prefs.restricoes.join(", ") : "Nenhuma"}
-- Não come: ${prefs.naoCome || "nada especificado"}
+REGRAS OBRIGATÓRIAS:
+1. Responda SOMENTE com JSON puro, sem texto antes ou depois, sem markdown, sem backticks
+2. Descrições CURTAS, máximo 80 caracteres cada
+3. Exatamente 7 dias, exatamente 5 categorias na lista com mínimo 4 itens cada
 
-Responda APENAS com JSON válido, sem texto extra, sem markdown, sem backticks. Formato:
-{
-  "dias": [
-    {
-      "dia": "Segunda-feira",
-      "icone": "🌅",
-      "cafe": "descrição do café da manhã",
-      "almoco": "descrição do almoço",
-      "jantar": "descrição do jantar"
-    }
-  ],
-  "lista": {
-    "Hortifrúti": [ {"nome": "Tomate", "quantidade": "6 unidades"} ],
-    "Proteínas": [],
-    "Grãos e carboidratos": [],
-    "Laticínios": [],
-    "Outros": []
-  }
-}
-
-Use ingredientes acessíveis no Brasil. Seja específico nas quantidades da lista de compras para ${prefs.pessoas} pessoas por 7 dias. Inclua no mínimo 4 itens por categoria na lista.`;
+Formato exato:
+{"dias":[{"dia":"Segunda-feira","icone":"🌅","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Terça-feira","icone":"🌞","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Quarta-feira","icone":"🌿","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Quinta-feira","icone":"⚡","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Sexta-feira","icone":"🎉","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Sábado","icone":"🌊","cafe":"...","almoco":"...","jantar":"..."},{"dia":"Domingo","icone":"☀️","cafe":"...","almoco":"...","jantar":"..."}],"lista":{"Hortifrúti":[{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."}],"Proteínas":[{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."}],"Grãos e carboidratos":[{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."}],"Laticínios":[{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."}],"Outros":[{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."},{"nome":"...","quantidade":"..."}]}}`;
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -67,7 +34,7 @@ Use ingredientes acessíveis no Brasil. Seja específico nas quantidades da list
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 2000,
+        max_tokens: 4000,
         messages: [{ role: "user", content: prompt }]
       })
     });
@@ -81,7 +48,14 @@ Use ingredientes acessíveis no Brasil. Seja específico nas quantidades da list
     const data = await response.json();
     const texto = data.content.map(i => i.text || "").join("");
     const clean = texto.replace(/```json|```/g, "").trim();
-    const resultado = JSON.parse(clean);
+
+    let resultado;
+    try {
+      resultado = JSON.parse(clean);
+    } catch (parseErr) {
+      console.error("JSON inválido recebido da IA:", clean.substring(0, 300));
+      return res.status(500).json({ erro: "A IA retornou um formato inválido. Tente novamente." });
+    }
 
     res.json(resultado);
   } catch (err) {
